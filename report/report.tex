@@ -1,0 +1,218 @@
+\documentclass[11 pt]{article}
+\usepackage{structure}
+
+\title{LEPL1110 - Éléments finis - Projet}
+\author{Vincent Degrooff - NOMA : 09341800}
+\date{13 Mai 2021}
+
+\begin{document}
+
+\maketitle
+
+\section{Précision du programme}
+Pour chacun des 5 maillages, notons l'approximation du potentiel vecteur $\hat{a}_i(x, y)$ pour $i=1 \dots 5$, $i$ croissant avec le nombre de noeuds.
+
+Pour mesurer l'ordre de convergence de mon programme d'éléments finis, je dois mesurer l'erreur commise par la solution discrète. Malheureusement, je ne possède pas la solution exacte. Sur base des solutions $\hat{a}_i(x,y)$ j'ai donc mesuré différentes valeurs pour valeurs pour valider mon programme: 
+
+\begin{enumerate}
+    \item $\left\| \hat{a}_i(x,y) \right\|$ :  la norme du résultat
+    \item $\left\| \hat{a}_{i+1}(x,y) - \hat{a}_i(x,y) \right\|$ : erreurs consécutives
+    \item $\left\| \hat{a}_{5}(x,y) - \hat{a}_i(x,y) \right\|$ : erreur par rapport à une référence (le plus grand maillage)
+\end{enumerate}
+
+Les normes considérées sont les normes $L^2$ et $H^1$. La longueur caractéristique $h$ des maillages est définie comme la moyenne des longueurs caractéristiques des éléments qui le compose, au nombre de $n_e$. Cette longueur a simplement été choisie comme la racine carré de l'aire de l'élément, notée $A$:
+$$h = \frac{1}{n_e} \sum_{j=1}^{n_e} \sqrt{A_j}$$
+
+\begin{figure}[!h]
+    \centering
+    \includesvg[width=15cm]{Figures/convergence.svg}
+    \caption{Mesure des erreurs en fonction de la taille des éléments}
+\end{figure}
+
+Tout d'abord, on constate bien qu'en diminuant la taille des éléments, la norme de la solution, en bleu, se "stabilise". C'est bon signe, mais ce n'est pas suffisant pour conclure. On doit encore mesurer la pente des courbes verte et orange qui correspondent aux différences entre les solutions.
+
+Pour calculer $\left \| \hat{a}_{i+1}(x,y) - \hat{a}_{i}(x,y) \right \|$, j'ai d'abord cherché à obtenir la solution du "petit maillage" sur chacun des noeuds du plus grand maillage. Ensuite, j'ai simplement intégré le carré de la différence entre les deux fonctions.
+
+Enfin, j'ai fait une approximation linéaire dans un graphique log-log. Si l'on note l'erreur $e=C \; h^p$, je peux finalement approximer l'ordre de précision de mon programme par rapport à la taille des éléments du maillage.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular*}{14cm}{@{\extracolsep{\stretch{1}}}*{4}{c}@{}}
+        \toprule
+        type de norme & $\left\| \hat{a}_{i+1}(x,y) - \hat{a}_i(x,y) \right\|$ & $\left\| \hat{a}_{5}(x,y) - \hat{a}_i(x,y) \right\|$  \\
+        \midrule
+        $L^2$ & $2.051$ & $2.481$ \\[2pt]
+        $H^1$ & $0.840$ & $1.368$ \\ 
+        \bottomrule                             
+    \end{tabular*}
+    \caption{Ordre de précision $p$ de la méthode d'éléments finis}
+\end{table}
+
+Pour la première colonne, les erreurs consécutives, on constate que l'ordre est à peu près en accord avec le résultat théorique qui annonce un ordre de $2$ pour la norme $L^2$ et de $1$ pour la norme $H^1$. Pour la deuxième méthode, j'utilise $\hat{a}_5(x,y)$ comme référence, comme s'il s'agissait de la solution exacte du problème. La convergence est donc logiquement plus rapide puisque qu'il est plus simple de s'en approcher, en augmentant quelque peu le nombre de noeuds.
+
+
+\section{Fonctionnement de l'algorithme}
+
+Voici le détail des étapes clés dans le calcul du potentiel vecteur:
+\begin{itemize}
+    \item Re-numérotation des noeuds pour améliorer le conditionnement de la matrice
+    \item Assemblage de la matrice en format COO
+    \item Tri des éléments de la matrice creuse + conversion en CSR
+    \item Factorisation ILU(0)
+    \item Gradient conjugué pré-conditionné
+\end{itemize}
+
+Afin d'obtenir de bonnes performances, j'utilise le gradient conjugué préconditionné (PCG) pour résoudre le système matriciel $Ax = b$. Il me semblait également important d'éviter d'assembler la matrice à chaque étape du PCG. C'est pourquoi j'ai construit deux structures de matrice creuse. La première, une structure COO (row, col, value) me permet d'assembler la matrice $A$ facilement. %\footnote{Dont certaines fonctions avaient été fournies dans le cours LINMA1170}
+
+Lorsque cette opération est terminée, je trie les éléments, notés \textit{ijk}, de la matrice creuse COO et j'additionne les éventuels doublons. Je la transforme ensuite en CSR (Compressed sparse row), plus efficace lors des calculs vectoriels. Ce format est similaire au COO sauf qu'il compresse les lignes.%: $\textrm{IA}[i]$ donne l'indice dans vecteur des colonnes $\textrm{JA}$ où commence la ligne $i$. 
+
+Lorsque la matrice est sous forme CSR, j'effectue le pré-conditionnement. Par simplicité, j'ai décidé d'implémenter une factorisation ILU(0). Finalement, j'effectue classiquement la procédure du gradient conjugué. %J'ai évidemment dû implémenter une fonction pour effectuer le produit matrice-vecteur et une autre fonction pour résoudre le système.
+
+Un exemple concret de matrice creuse est fourni à la figure \ref{sparse}. On y remarque qu'une matrice de taille $n \times n$ avec $\NNZ$ éléments non nuls peut être stockée au format:
+\begin{itemize}
+    \item COO : en $3$ vecteurs de taille $\NNZ$
+    \item CSR : en $2$ vecteurs de taille $\NNZ$ et un taille $n + 1$
+\end{itemize}
+
+\begin{figure}[!ht]
+    \centering
+    \includegraphics[width=14.cm]{Figures/sparseStruc.png}
+    \caption{Exemple de matrice creuse}
+    \label{sparse}
+\end{figure}
+
+
+\section{Performances du code}
+\vspace{-0.2cm}
+
+\begin{figure}[!h]
+    \centering
+    \includesvg[width=\textwidth]{Figures/complexity.svg}
+    \caption{Temps de calcul du programme en fonction du maillage et sa répartition dans différents postes}
+    \label{complexity}
+\end{figure}
+
+Pour mesurer le temps de calcul du code, j'ai exécuté les quatre fonctions lors de 50 rotations successives. Comme la première exécution est légèrement plus lente, je ne la prend pas en compte dans mon analyse. Cette démarche me semble appropriée puisque cette première itération ne représente qu'une fraction du temps de calcul sur une simulation complète.
+
+Le graphique de gauche à la figure \ref{complexity} représente le temps de calcul complet pour une itération temporelle, noté $T$, en fonction du nombre de noeuds $n$. En effectuant une régression linéaire sur le logarithme de $T$ et le logarithme de $n$, on obtient un ordre de convergence légèrement supérieur à l'unité:
+\[\log{T} \approx 1.18 \; \log{n} + C_1 \iff T \approx C_2 \; n^{1.18}\]
+Sur le graphique de droite, on peut voir le temps pris par les différentes parties du programme. On constate tout d'abord que les opérations de remaillage et de calcul du couple sont négligeables face aux différentes parties du calcul du potentiel magnétique. La numérotation des noeuds est également très rapide, mais j'y reviens plus en détails dans la section suivante.
+
+On peut donc affirmer que la rapidité du programme est surtout dictée par deux opérations:
+\begin{itemize}
+    \item l'assemblage de la matrice COO et son tri pour en retirer les doublons
+    \item le PCG avec les produits matrice-vecteur et la résolution des deux systèmes triangulaires (back subsitution et forward substitution)
+\end{itemize}
+
+La rapidité du préconditionneur ILU(0) le rend d'autant plus intéressant puisqu'il permet de réduire considérablement le nombre d'itérations des gradients conjugués.
+
+
+\section{Impact de la numérotation}
+\begin{figure}[!ht]
+    \centering
+    \begin{subfigure}[t]{0.44\textwidth}
+        \centering
+        \includesvg[width=\textwidth]{Figures/numberingSpy.svg}
+    \end{subfigure}
+    \hspace{0.5em}
+    \begin{subfigure}[t]{0.44\textwidth}
+        \centering
+        \includesvg[width=\textwidth]{Figures/numberingTime1.svg}
+    \end{subfigure}
+    \caption{Impact de la numérotation sur la matrice (size=14608) et sur le temps de calcul}
+    \label{numbering}
+\end{figure}
+
+Si l'on se contente de re-numéroter les noeuds uniquement à l'itération $0$, la forme de la matrice évoluera au cours des itérations suivantes puisque, suite à la rotation du rotor, les triangles de la bande \textit{GAP} changent de noeuds. Cette évolution est fournie à la figure \ref{numbering}. Au delà d'être esthétiquement plaisant, ce graphique montre que la largeur de bande de la matrice augmente et est maximale lorsque la rotation est de $180$ degrés, comme on pouvait s'y attendre.
+
+J'ai donc décidé de re-numéroter les noeuds (dans la direction $x$) à chaque itération temporelle puisque, comme on l'a vu à la figure \ref{complexity}, cette re-numérotation prend un temps plus que négligeable: inférieur à $0.5 \%$.
+
+Sur la partie droite de la figure \ref{numbering}, les temps de calcul pour trois méthodes sont représentés : sans aucune re-numérotation, avec une seule à la première itération et avec des re-numérotations à chaque étape. On remarque tout d'abord que pour les plus petits maillages, cette opération n'apporte presque aucune plus value. Ensuite, on remarque logiquement que la numérotation à chaque étape permet d'augmenter légèrement les performances même pour des rotations faibles de $5$ degrés.
+
+\section{Relation Couple - position angulaire}
+\vspace{-0.3cm}
+Dans la position de référence, avec les bobines A activées, le couple produit sur le rotor est négatif. Ce denier accélère et commence donc à tourner dans le sens négatif, c'est à dire de manière horlogique. Pour simplifier la lecture du prochain graphique, j'ai décidé de changer les signes des rotations et des couples afin d'avoir des valeurs positives.
+
+\begin{figure}[!h]
+    \centering
+    \includesvg[width=\textwidth]{Figures/torqueAngle.svg}
+    \caption{Couple exercé sur le rotor au cours de sa rotation}
+    \label{torque}
+\end{figure}
+
+Pour obtenir le plus grand couple moyen, il faut simplement toujours choisir la bobine qui fournit le plus grand couple. Dans notre cas, il faut changer de bobine tous les $30$° avec un décalage initial d'à peu près $18.33$°.
+
+\nocite{*}
+\printbibliography
+
+\newpage
+
+\begin{appendices}
+
+\section{Magnétostatique non-linéaire}
+
+\begin{figure}[!h]
+    \centering
+    \includesvg[width=\textwidth]{Figures/hysteresis.svg}
+    \caption{Paramètres nécessaires pour la modélisation non-linéaire}
+    \label{hysteresis}
+\end{figure}
+
+Nous souhaitons résoudre l'équation non-linéaire suivante:
+\[
+\boldsymbol{f}(\upx) = A(\upx) \cdot \upx - b = 0
+\]
+
+Pour y parvenir, nous allons utiliser l'algorithme de Newton-Rhapson pour des sytèmes non-linéaires. Le potentiel magnétique $a(x, y)$ qui est obtenu à l'itération $n$ est notée $\upx^n$:
+\begin{align*}
+    \left. \frac{\partial \boldsymbol{f}}{\partial \upx} \right\rvert_{\upx^n} \cdot \left(\upx^{n+1} - \upx^n \right) &= -\boldsymbol{f}(\upx^n)\\
+    \left(\left. \frac{\partial A}{\partial \upx}\right\rvert_{\upx^n} \cdot \upx^n + A(\upx^n)\right) \cdot \Delta \upx &= b - A(\upx^n) \cdot \upx^n
+\end{align*}
+
+Le terme $\frac{\partial \boldsymbol{f}}{\partial \upx}$ est fourni dans les slides du CM9. On en déduit une forme plus explicite, où 
+$b^2=\|B\|^2 = \Big(\frac{\partial a}{\partial x}\Big)^2 + \Big(\frac{\partial a}{\partial y}\Big)^2$:
+
+\begin{align*}
+A_{ij}(\upx^n) &= \int_{\Omega} \mu^{-1}(b^2) 
+\left(\frac{\partial \phi_i}{\partial x} \frac{\partial \phi_j}{\partial x} + 
+\frac{\partial \phi_i}{\partial y} \frac{\partial \phi_j}{\partial y} \right)\\
+\left. \frac{\partial A_{ik}}{\partial \upx_j} \right\rvert_{\upx^n} \cdot \upx_k^n &=
+\int_{\Omega} 2 \left. \frac{d\mu^{-1}}{db^2} \right\rvert_{b^2}
+\left(\frac{\partial \phi_i}{\partial x} \frac{\partial \upx^n}{\partial x}  + \frac{\partial \phi_i}{\partial y} \frac{\partial \upx^n}{\partial y} \right)
+\cdot
+\left(\frac{\partial \phi_j}{\partial x} \frac{\partial \upx^n}{\partial x}  + \frac{\partial \phi_j}{\partial y} \frac{\partial \upx^n}{\partial y} \right)
+\end{align*}
+
+Pour calculer cette intégrale, nous devons évaluer la perméabilité et sa dérivée par rapport à $b^2$. Nous avons à notre disposition une liste de couple ($H$, $B$) qui nous permet d'évaluer la perméabilité par la relation $B = \mu H$. Cependant, nous souhaitons calculer $\mu^{-1}$ et $\frac{d\mu^{-1}}{db^2}$ pour n'importe quelles valeurs de $b^2$. C'est la raison pour laquelle j'ai décidé d'utiliser une interpolation par splines cubiques de $H$ en fonction de $B$. J'ai préféré cette option à une simple interpolation linéaire par morceaux puisqu'elle a l'avantage de préserver la continuité de la dérivée. Cette interpolation est représentée à la figure \ref{hysteresis}.
+
+Avant d'effectuer l'itération de l'algorithme de Newton, j'ai besoin d'un itéré initial. Pour obtenir cette valeur initiale $\upx^0$, soit je résous le système linéaire avec une perméabilité de l'acier constante, soit je reprends la solution de l'itération précédente. En général, je reprends la solution précédente pour gagner du temps, sauf s'il y a un changement de bobine, ou si le $\Delta \theta$ est trop important.
+%qui vaut $\mu^{-1}(\|B\|=0)$.
+
+Ensuite, grâce à l'interpolation par splines cubiques, je peux assembler la matrice jacobienne de l'algorithme de Newton-Rhapson sur base des deux intégrales définies plus haut. J'effectue finalement l'algorithme jusqu'à ce que le $\Delta x$ soit suffisamment petit.
+
+Les effets de la non linéarité ne sont ressentis que pour d'importantes valeurs de $j_s$. En effet, si l'on gardait la valeur de l'énoncé $j_s = $ \num{8.8464d5} [\si{A.s^{-2}}], le champ $B \approx$ \num{0.04} [\si{T}] resterait trop faible et l'on atteindrait pas la saturation dans le diagramme $B - H$.
+
+J'ai donc mesuré le couple pour différentes valeurs de densité de courant: $j_s = k \, \cdot$ \num{8.8464d5} [\si{A.s^{-2}}], avec $k$ variable.
+
+%Cependant, la solution du problème non-linéaire est extrêmement proche de celle du problème linéaire. En utilisant $j_s = $ \num{8.8464d5} [\si{A.s^{-2}}], le champ magnétique reste trop faible pour observer une quelconque variation de la perméabilité : $B \approx$  \num{0.04} [\si{T}]. J'ai donc augmenté la densité de courant $j_s = k \, \cdot$ \num{8.8464d5} [\si{A.s^{-2}}] pour que la norme de $B$ augmente et que l'on atteigne la saturation du champ magnétique.
+
+\begin{figure}[!h]
+    \centering
+    \includesvg[width=\textwidth]{Figures/nonLinear.svg}
+    \caption{Impact de la non-linéarité sur le couple}
+    \label{nonlinear}
+\end{figure}
+
+On observe bien, comme attendu que la solution linéaire fournit un couple qui évolue quadratiquement avec le courant (droite de pente $2$ sur le graphe log-log). Au contraire, la solution non-linéaire démontre bien que l'acier sature pour de trop grandes valeurs de $B$.
+
+\end{appendices}
+
+
+%\printbibliography[type=book,title={Livres}]
+%\begingroup
+%\sloppy
+%\printbibliography[type=online,title={Ressources Internet}]
+%\endgroup
+
+\end{document}
+

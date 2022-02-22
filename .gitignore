@@ -1,0 +1,6 @@
+build/
+debug/
+backup/
+data/cooMatrixFULL.txt
+data/cooMatrixONCE.txt
+data/cooMatrixZERO.txt
